@@ -72,7 +72,18 @@ export function createGateway({ upstream, username, password }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const server = createGateway({ upstream: process.env.STAGING_FRONTEND_URL || `http://${process.env.STAGING_FRONTEND_HOST}:3000`,
     username: process.env.STAGING_USERNAME, password: process.env.STAGING_PASSWORD });
-  server.listen(Number(process.env.PORT || 10000), '0.0.0.0');
+  server.listen(Number(process.env.PORT || 10000), '0.0.0.0', async () => {
+    if (process.env.STAGING_RUN_SMOKE !== '1') return;
+    try {
+      const { smoke } = await import('./smoke.mjs');
+      const result = await smoke(`http://127.0.0.1:${server.address().port}`,
+        process.env.STAGING_USERNAME, process.env.STAGING_PASSWORD);
+      console.info(JSON.stringify(result));
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'staging_smoke', status: 'failed',
+        reason: error instanceof Error ? error.message : 'Unknown validation error' }));
+    }
+  });
   process.on('SIGTERM', () => {
     server.close();
     setTimeout(() => process.exit(0), 25000).unref();
