@@ -63,15 +63,11 @@
                   "value": "600000"
                 },
                 {
-                  "key": "RAMS_API_HOST",
-                  "fromService": {
-                    "name": "rams-ai-staging-api",
-                    "type": "pserv",
-                    "property": "host"
-                  }
+                  "key": "RAMS_API_URL",
+                  "value": "http://rams-ai-staging-api:8000"
                 }
               ],
-              "dockerCommand": "sh -c 'export RAMS_API_URL=http://${RAMS_API_HOST}:8000; exec node server.js'"
+              "dockerCommand": "node server.js"
             },
             {
               "name": "rams-ai-staging-ingress",
