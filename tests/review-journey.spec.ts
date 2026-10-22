@@ -57,7 +57,7 @@ async function start(page: Page) {
 }
 
 async function run(page: Page, waitForSave = true) {
-  await page.route("http://127.0.0.1:8000/review", async (route) => {
+  await page.route("**/api/backend/review", async (route) => {
     const body = route.request().postDataBuffer()?.toString() || "";
     expect(body).toContain('name="review_files"; filename="rams.docx"');
     expect(body).toContain('name="supporting_files"; filename="site-policy.pdf"');
@@ -85,7 +85,7 @@ test("upload, save, reopen and export PDF retain review data and document names"
   await expect(page.getByRole("button", { name: "Download Report" })).toBeVisible();
   await expect(page.getByText("📄 rams.docx", { exact: true })).toBeVisible();
   let payload: Record<string, unknown> = {};
-  await page.route("**/review/dashboard-pdf", async (route) => {
+  await page.route("**/api/backend/review/dashboard-pdf", async (route) => {
     payload = route.request().postDataJSON();
     await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\nfixture" });
   });
@@ -101,7 +101,7 @@ test("upload, save, reopen and export PDF retain review data and document names"
 for (const operation of ["pdf", "reassess", "email"] as const) {
   test(`${operation} failure preserves saved review and permits retry`, async ({ page }) => {
     await run(page);
-    const endpoint = operation === "pdf" ? "**/review/dashboard-pdf" : operation === "email" ? "**/contractor-email" : "**/review/reassess-documents";
+    const endpoint = operation === "pdf" ? "**/api/backend/review/dashboard-pdf" : operation === "email" ? "**/api/backend/contractor-email" : "**/api/backend/review/reassess-documents";
     await page.route(endpoint, (route) => route.fulfill({ status: 503, json: { detail: "Fixture service unavailable" } }));
     const button = operation === "pdf" ? page.getByRole("button", { name: "Download Report" }) : operation === "email" ? page.getByRole("button", { name: /Generate.*Email/i }) : page.getByRole("button", { name: "Reassess Submission", exact: true });
     if (operation !== "pdf") await page.getByPlaceholder("Add close-out notes, evidence provided, contractor clarifications, closed items, remaining actions, or final reviewer position...").fill("Fixture evidence");
@@ -125,12 +125,12 @@ for (const operation of ["pdf", "reassess", "email"] as const) {
 }
 
 test("failed initial review can be retried with the same files", async ({ page }) => {
-  await page.route("http://127.0.0.1:8000/review", (route) => route.fulfill({ status: 400, json: { detail: "Unsupported file type" } }));
+  await page.route("**/api/backend/review", (route) => route.fulfill({ status: 400, json: { detail: "Unsupported file type" } }));
   await start(page);
   await page.getByRole("button", { name: "Run Review", exact: true }).click();
   await expect(page.locator("main").getByRole("alert")).toContainText("Unsupported file type");
   await expect(page.getByRole("button", { name: "Run Review", exact: true })).toBeEnabled();
-  await page.route("http://127.0.0.1:8000/review", (route) => route.fulfill({ json: review }));
+  await page.route("**/api/backend/review", (route) => route.fulfill({ json: review }));
   await page.getByRole("button", { name: "Run Review", exact: true }).click();
   await expect(page.getByRole("button", { name: "Download Report" })).toBeVisible();
 });
@@ -146,7 +146,7 @@ test("reassessment submits revised files and saves returned text and history", a
   await run(page);
   const before = await stored(page);
   const updated = openReassessment.review_text;
-  await page.route("**/review/reassess-documents", async (route) => {
+  await page.route("**/api/backend/review/reassess-documents", async (route) => {
     const body = route.request().postDataBuffer()?.toString() || "";
     expect(body.replace(/\r\n/g, "\n")).toContain(reviewText);
     expect(body).toContain('filename="revision.docx"');
@@ -168,7 +168,7 @@ test("reassessment submits revised files and saves returned text and history", a
 
 test("empty initial upload is rejected before contacting the API", async ({ page }) => {
   let contacted = false;
-  await page.route("http://127.0.0.1:8000/review", async (route) => { contacted = true; await route.abort(); });
+  await page.route("**/api/backend/review", async (route) => { contacted = true; await route.abort(); });
   await page.goto("/review");
   await page.getByRole("button", { name: "Enter", exact: true }).click();
   await page.getByRole("button", { name: "Run Review", exact: true }).click();
@@ -193,7 +193,7 @@ test("storage quota failure leaves the review available for export", async ({ pa
 
 test("closed reassessment updates dashboard, saved state and PDF while preserving original history", async ({ page }) => {
   await run(page);
-  await page.route("**/review/reassess-documents", async (route) => {
+  await page.route("**/api/backend/review/reassess-documents", async (route) => {
     const body = route.request().postDataBuffer()?.toString() || "";
     expect(body).toContain('name="original_findings"');
     expect(body).toContain('"ref":"001"');
@@ -227,7 +227,7 @@ test("closed reassessment updates dashboard, saved state and PDF while preservin
   expect(record.score).toBe(96);
   expect(record.reviewVersions[0].score).toBe(82);
   let pdf: Record<string, unknown> = {};
-  await page.route("**/review/dashboard-pdf", async (route) => {
+  await page.route("**/api/backend/review/dashboard-pdf", async (route) => {
     pdf = route.request().postDataJSON();
     await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\nfixture" });
   });
@@ -241,7 +241,7 @@ test("closed reassessment updates dashboard, saved state and PDF while preservin
   expect(pdf.control_effectiveness).toBe(96);
   await expect(page.getByText("Review 1 — 82% — Further Amendments Required", { exact: true })).toBeVisible();
 
-  await page.route("**/review/reassess-documents", (route) => route.fulfill({ json: { ...openReassessment, score: 90, band: "Excellent", control_effectiveness: 90, findings: [{ ...review.findings[0], severity: "Major" }], review_text: "### **__Reassessed Executive Summary__**\n- Updated Score: 90%\n- Decision: Further Amendments Required" } }));
+  await page.route("**/api/backend/review/reassess-documents", (route) => route.fulfill({ json: { ...openReassessment, score: 90, band: "Excellent", control_effectiveness: 90, findings: [{ ...review.findings[0], severity: "Major" }], review_text: "### **__Reassessed Executive Summary__**\n- Updated Score: 90%\n- Decision: Further Amendments Required" } }));
   await page.getByRole("button", { name: "Reassess Submission", exact: true }).click();
   await page.waitForFunction(() => JSON.parse(localStorage.getItem("rams_ai_submissions") || "[]")[0]?.score === 90);
   record = await stored(page);
@@ -259,7 +259,7 @@ for (const [label, invalid] of [
   test(`${label} reassessment cannot overwrite the previous review`, async ({ page }) => {
     await run(page);
     const before = await stored(page);
-    await page.route("**/review/reassess-documents", (route) => route.fulfill({ json: invalid }));
+    await page.route("**/api/backend/review/reassess-documents", (route) => route.fulfill({ json: invalid }));
     await page.getByPlaceholder("Add close-out notes, evidence provided, contractor clarifications, closed items, remaining actions, or final reviewer position...").fill("Fixture evidence");
     await page.getByRole("button", { name: "Reassess Submission", exact: true }).click();
     await expect(page.locator("main").getByRole("alert")).toContainText("previous review has been preserved");

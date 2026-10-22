@@ -16,6 +16,7 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run start -- --port 3100",
+    env: { RAMS_API_URL: "http://127.0.0.1:9" },
     url: "http://localhost:3100",
     reuseExistingServer: false,
   },
