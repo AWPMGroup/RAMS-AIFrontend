@@ -1,0 +1,120 @@
+{
+  "projects": [
+    {
+      "name": "rams-ai-staging",
+      "environments": [
+        {
+          "name": "staging",
+          "services": [
+            {
+              "name": "rams-ai-staging-api",
+              "type": "pserv",
+              "runtime": "docker",
+              "plan": "0.5c-512mb",
+              "region": "frankfurt",
+              "numInstances": 1,
+              "repo": "https://github.com/AWPMGroup/RAM-AI",
+              "branch": "dev/staging-readiness",
+              "autoDeployTrigger": "off",
+              "envVars": [
+                {
+                  "key": "APP_ENV",
+                  "value": "staging"
+                },
+                {
+                  "key": "APP_VERSION",
+                  "value": "452a24a0e35cdecc43d636b95bdd56567df11ba5"
+                },
+                {
+                  "key": "OPENAI_API_KEY",
+                  "value": ""
+                },
+                {
+                  "key": "CORS_ALLOW_ORIGINS",
+                  "value": ""
+                }
+              ]
+            },
+            {
+              "name": "rams-ai-staging-frontend",
+              "type": "pserv",
+              "runtime": "docker",
+              "plan": "0.5c-512mb",
+              "region": "frankfurt",
+              "numInstances": 1,
+              "repo": "https://github.com/AWPMGroup/RAMS-AIFrontend",
+              "branch": "dev/staging-readiness",
+              "autoDeployTrigger": "off",
+              "envVars": [
+                {
+                  "key": "PORT",
+                  "value": "3000"
+                },
+                {
+                  "key": "APP_ENV",
+                  "value": "staging"
+                },
+                {
+                  "key": "APP_VERSION",
+                  "value": "489b63057ce2e59aebf8228b4a01ed2aa8dea5b3"
+                },
+                {
+                  "key": "RAMS_API_TIMEOUT_MS",
+                  "value": "600000"
+                },
+                {
+                  "key": "RAMS_API_HOST",
+                  "fromService": {
+                    "name": "rams-ai-staging-api",
+                    "type": "pserv",
+                    "property": "host"
+                  }
+                }
+              ],
+              "dockerCommand": "sh -c 'export RAMS_API_URL=http://${RAMS_API_HOST}:8000; exec node server.js'"
+            },
+            {
+              "name": "rams-ai-staging-ingress",
+              "type": "web",
+              "runtime": "docker",
+              "plan": "0.5c-512mb",
+              "region": "frankfurt",
+              "numInstances": 1,
+              "repo": "https://github.com/AWPMGroup/RAMS-AIFrontend",
+              "branch": "dev/render-staging-infrastructure",
+              "autoDeployTrigger": "off",
+              "envVars": [
+                {
+                  "key": "PORT",
+                  "value": "10000"
+                },
+                {
+                  "key": "STAGING_USERNAME",
+                  "value": "rams-staging"
+                },
+                {
+                  "key": "STAGING_PASSWORD",
+                  "generateValue": true
+                },
+                {
+                  "key": "STAGING_FRONTEND_HOST",
+                  "fromService": {
+                    "name": "rams-ai-staging-frontend",
+                    "type": "pserv",
+                    "property": "host"
+                  }
+                }
+              ],
+              "dockerContext": "./deploy/render-staging/gateway",
+              "dockerfilePath": "./deploy/render-staging/gateway/Dockerfile",
+              "healthCheckPath": "/_staging/live"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "previews": {
+    "generation": "off"
+  }
+}
