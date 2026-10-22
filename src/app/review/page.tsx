@@ -24,6 +24,54 @@ type Finding = {
   aiReasoning?: string;
 };
 
+type StoredReview = {
+  id?: string;
+  submissionId?: string;
+  reviewerName?: string;
+  reviewer?: string;
+  country?: string;
+  projectType?: string;
+  project?: string;
+  contractorName?: string;
+  contractor?: string;
+  reviewerNotes?: string;
+  siteOccupied?: string;
+  liveElectrical?: string;
+  workAtHeight?: string;
+  hotWorks?: string;
+  liftingOps?: string;
+  permitRequired?: string;
+  rescuePlanExpected?: string;
+  publicInterface?: string;
+  reviewerComments?: string;
+  reviewText?: string;
+  review?: string;
+  band?: string;
+  scoreBand?: string;
+  decision?: string;
+  outcome?: string;
+  status?: string;
+  riskExposure?: string;
+  risk_exposure?: string;
+  residualRisk?: string;
+  residual_risk?: string;
+  score?: number;
+  controlEffectiveness?: number;
+  control_effectiveness?: number;
+  ratings?: Record<string, string>;
+  uploadedDocuments?: string[];
+  uploadedSupportingDocuments?: string[];
+  findingsRegister?: Finding[];
+  findings?: Finding[];
+  reviewHistory?: string[];
+};
+
+type ReviewFinding = Partial<Finding> & {
+  category_label?: string;
+  reason?: string;
+  evidence?: string;
+};
+
 export default function Review() {
   const [reviewerName, setReviewerName] = useState("");
   const [country, setCountry] = useState("");
@@ -156,12 +204,12 @@ export default function Review() {
     const active = localStorage.getItem("rams_ai_active_review");
 
     try {
-      let saved: any = active ? JSON.parse(active) : null;
+      let saved: StoredReview | null = active ? JSON.parse(active) : null;
       const savedId = saved?.id || saved?.submissionId;
 
       if (!saved || savedId !== requestedSubmissionId) {
         const storedSubmissions = localStorage.getItem("rams_ai_submissions");
-        const parsedSubmissions = storedSubmissions ? JSON.parse(storedSubmissions) : [];
+        const parsedSubmissions: StoredReview[] = storedSubmissions ? JSON.parse(storedSubmissions) : [];
         const matched = Array.isArray(parsedSubmissions)
           ? parsedSubmissions.find((item) => (item.id || item.submissionId) === requestedSubmissionId)
           : null;
@@ -305,7 +353,7 @@ export default function Review() {
       setStructuredRatings(data.ratings || {});
       if (Array.isArray(data.findings)) {
         const today = new Date().toLocaleDateString("en-GB");
-        setFindingRegister(data.findings.map((item: any, index: number) => ({
+        setFindingRegister(data.findings.map((item: ReviewFinding, index: number) => ({
           ref: item.ref || String(index + 1).padStart(3, "0"),
           category: item.category || item.category_label || "Process",
           finding: item.finding || item.reason || "Finding requires reviewer confirmation.",
