@@ -1,0 +1,1 @@
+Geist Latin and Geist Mono Latin variable WOFF2 files, copied unchanged from Next.js 16.2.2 (`next/dist/next-devtools/server/font/`). Upstream: https://github.com/vercel/geist-font. Licensed under SIL OFL 1.1; see OFL.txt. These are local application assets so production builds require no font downloads. The existing Arial body style is preserved.

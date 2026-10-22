@@ -38,6 +38,8 @@ export default function SubmissionsPage() {
       const stored = JSON.parse(
         localStorage.getItem("rams_ai_submissions") || "[]",
       );
+      // Hydrate browser-only storage after mount to preserve the server-rendered initial state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSubmissions(Array.isArray(stored) ? stored : []);
     } catch {
       setSubmissions([]);
@@ -54,9 +56,9 @@ export default function SubmissionsPage() {
     if (!submission?.id) return;
 
     localStorage.setItem("rams_ai_active_review", JSON.stringify(submission));
-    window.location.href = `/review?submissionId=${encodeURIComponent(
+    window.location.assign(`/review?submissionId=${encodeURIComponent(
       submission.id,
-    )}`;
+    )}`);
   };
 
   const exportValidationDataset = () => {
