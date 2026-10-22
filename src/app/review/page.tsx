@@ -330,7 +330,7 @@ export default function Review() {
       setUploadedSupportingNames(supportingFiles.map((file) => file.name));
       setStatusMessage("Running review...");
 
-      const response = await fetch("http://127.0.0.1:8000/review", {
+      const response = await fetch("/api/backend/review", {
         method: "POST",
         body: buildFormData(),
       });
@@ -381,7 +381,7 @@ export default function Review() {
       setStatusMessage("Generating PDF...");
 
       const response = await fetch(
-        "http://127.0.0.1:8000/review/dashboard-pdf",
+        "/api/backend/review/dashboard-pdf",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -454,7 +454,7 @@ export default function Review() {
       formData.append("contractor_email", contractorEmail);
       formData.append("contractor_name", contractorName);
 
-      const response = await fetch("http://127.0.0.1:8000/contractor-email", {
+      const response = await fetch("/api/backend/contractor-email", {
         method: "POST",
         body: formData,
       });
@@ -515,7 +515,7 @@ export default function Review() {
       );
 
       const response = await fetch(
-        "http://127.0.0.1:8000/review/reassess-documents",
+        "/api/backend/review/reassess-documents",
         {
           method: "POST",
           body: formData,

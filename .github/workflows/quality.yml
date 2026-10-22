@@ -19,3 +19,16 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - name: Build staging container
+        run: docker build --build-arg APP_VERSION=${{ github.sha }} -t rams-ai-frontend:ci .
+      - name: Check staging container startup
+        run: |
+          docker run -d --name rams-frontend-ci -p 127.0.0.1:13000:3000 rams-ai-frontend:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:13000/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:13000/api/health
+      - name: Stop staging test container
+        if: always()
+        run: docker rm -f rams-frontend-ci || true
