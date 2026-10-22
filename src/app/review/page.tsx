@@ -105,6 +105,7 @@ export default function Review() {
   const [structuredRatings, setStructuredRatings] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("Idle");
 
+  const [requestError, setRequestError] = useState("");
   const [loading, setLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [generatingEmail, setGeneratingEmail] = useState(false);
@@ -310,6 +311,11 @@ export default function Review() {
   };
 
   const runReview = async () => {
+    setRequestError("");
+    if (reviewFiles.length === 0) {
+      setRequestError("Upload at least one RAMS / method statement document before running a review.");
+      return;
+    }
     try {
       setLoading(true);
       setReviewOutput("");
@@ -369,15 +375,14 @@ export default function Review() {
       setStatusMessage("Review complete");
     } catch (error) {
       setStatusMessage("Error");
-      setReviewOutput(
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      setRequestError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   };
 
   const downloadPdf = async () => {
+    setRequestError("");
     try {
       setDownloadingPdf(true);
       setStatusMessage("Generating PDF...");
@@ -405,7 +410,12 @@ export default function Review() {
             risk_exposure: inherentRiskLevel,
             residual_risk: residualRiskLevel,
             control_effectiveness: controlEffectiveness,
-            documents_reviewed: reviewFiles.map((file) => file.name),
+            documents_reviewed: [...new Set([
+              ...uploadedDocumentNames,
+              ...uploadedSupportingNames,
+              ...reviewFiles.map((file) => file.name),
+              ...supportingFiles.map((file) => file.name),
+            ])],
             review_basis_summary: reviewMeta.summary,
             findings: registerFindings,
             closed_findings: closedFindings,
@@ -433,15 +443,14 @@ export default function Review() {
       setStatusMessage("PDF downloaded");
     } catch (error) {
       setStatusMessage("PDF failed");
-      setReviewOutput(
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      setRequestError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setDownloadingPdf(false);
     }
   };
 
   const generateContractorEmail = async () => {
+    setRequestError("");
     try {
       setGeneratingEmail(true);
       setStatusMessage("Generating contractor email...");
@@ -468,9 +477,7 @@ export default function Review() {
       setStatusMessage("Contractor email ready");
     } catch (error) {
       setStatusMessage("Email generation failed");
-      setReviewOutput(
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      setRequestError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setGeneratingEmail(false);
     }
@@ -478,6 +485,7 @@ export default function Review() {
 
   const reassessReview = async () => {
     if (!reviewOutput || reviewOutput.startsWith("Error:")) return;
+    setRequestError("");
 
     try {
       setReassessingReview(true);
@@ -541,9 +549,7 @@ export default function Review() {
       setStatusMessage("Submission reassessed");
     } catch (error) {
       setStatusMessage("Reassessment failed");
-      setReviewOutput(
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      setRequestError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setReassessingReview(false);
     }
@@ -1388,18 +1394,23 @@ export default function Review() {
       updatedAt: new Date().toISOString(),
     };
 
-    localStorage.setItem("rams_ai_active_review", JSON.stringify(record));
-
-    const existing = JSON.parse(
-      localStorage.getItem("rams_ai_submissions") || "[]",
-    );
-    const withoutCurrent = existing.filter(
-      (item: { id: string }) => item.id !== record.id,
-    );
-    localStorage.setItem(
-      "rams_ai_submissions",
-      JSON.stringify([record, ...withoutCurrent].slice(0, 50)),
-    );
+    try {
+      localStorage.setItem("rams_ai_active_review", JSON.stringify(record));
+      let existing: { id: string }[] = [];
+      try {
+        const parsed: unknown = JSON.parse(localStorage.getItem("rams_ai_submissions") || "[]");
+        if (Array.isArray(parsed)) existing = parsed.filter((item) => item && typeof item.id === "string");
+      } catch {
+        // A malformed browser history must not prevent saving the current review.
+      }
+      const withoutCurrent = existing.filter((item) => item.id !== record.id);
+      localStorage.setItem(
+        "rams_ai_submissions",
+        JSON.stringify([record, ...withoutCurrent].slice(0, 50)),
+      );
+    } catch {
+      setRequestError("The review is still open, but browser storage could not save it. Download the report before leaving this page.");
+    }
   }, [
     reviewOutput,
     submissionId,
@@ -1516,6 +1527,12 @@ export default function Review() {
               20 May 2026
             </div>
           </header>
+
+          {requestError && (
+            <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-white p-6 text-red-700 shadow-sm">
+              {requestError}
+            </div>
+          )}
 
           {!reviewOutput && (
             <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
