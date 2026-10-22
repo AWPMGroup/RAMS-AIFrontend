@@ -23,6 +23,29 @@ const review = {
   findings: [{ ref: "001", category: "04 Emergency & Rescue", finding: "Site-specific rescue plan missing.", severity: "Critical", status: "Open", action: "Supply the site-specific rescue plan." }],
 };
 
+const openReassessment = {
+  schema_version: 1,
+  scoring_method: "reassessment-v1",
+  review_text: "### **__Reassessed Executive Summary__**\n- Updated Position: Further Amendments Required\n- Updated Score: 80%\n- Decision: Further Amendments Required",
+  score: 80,
+  band: "Good",
+  decision: "Further Amendments Required",
+  risk_exposure: "HIGH",
+  residual_risk: "MEDIUM",
+  control_effectiveness: 80,
+  findings: review.findings,
+};
+const closedReassessment = {
+  ...openReassessment,
+  review_text: "### **__Reassessed Executive Summary__**\n- Updated Position: Ready for Approver Review\n- Updated Score: 96%\n- Decision: Ready for Approver Review",
+  score: 96,
+  band: "Excellent",
+  decision: "Ready for Approver Review",
+  residual_risk: "LOW",
+  control_effectiveness: 96,
+  findings: [{ ...review.findings[0], status: "Closed", sourceRefs: ["001"], dateClosed: "22/10/2026", evidenceUsed: "Revision C and reviewer confirmation", action: "Closed - revision C confirms the rescue arrangements." }],
+};
+
 async function start(page: Page) {
   await page.goto("/review");
   await page.getByRole("button", { name: "Enter", exact: true }).click();
@@ -89,7 +112,7 @@ for (const operation of ["pdf", "reassess", "email"] as const) {
     expect((await stored(page)).reviewText).toBe(reviewText);
     await page.route(endpoint, (route) => operation === "pdf"
       ? route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\nfixture" })
-      : route.fulfill({ json: operation === "email" ? { subject: "Fixture subject", body: "Fixture email draft" } : { review: reviewText } }));
+      : route.fulfill({ json: operation === "email" ? { subject: "Fixture subject", body: "Fixture email draft" } : openReassessment }));
     const download = operation === "pdf" ? page.waitForEvent("download") : null;
     await button.click();
     if (download) await download;
@@ -121,13 +144,14 @@ test("malformed submission storage does not prevent a new review being saved", a
 
 test("reassessment submits revised files and saves returned text and history", async ({ page }) => {
   await run(page);
-  const updated = "### **__Reassessed Executive Summary__**\n- Updated Position: Further Amendments Required\n- Updated Score: 82%\n- Summary: Fixture additional evidence received; the original finding remains open pending competent review.";
+  const before = await stored(page);
+  const updated = openReassessment.review_text;
   await page.route("**/review/reassess-documents", async (route) => {
     const body = route.request().postDataBuffer()?.toString() || "";
     expect(body.replace(/\r\n/g, "\n")).toContain(reviewText);
     expect(body).toContain('filename="revision.docx"');
     expect(body).toContain("Fixture evidence");
-    await route.fulfill({ json: { review: updated, updated_review: updated } });
+    await route.fulfill({ json: openReassessment });
   });
   await page.getByPlaceholder("Add close-out notes, evidence provided, contractor clarifications, closed items, remaining actions, or final reviewer position...").fill("Fixture evidence");
   await page.locator('input[type=file]').nth(0).setInputFiles({ name: "revision.docx", mimeType: "application/octet-stream", buffer: Buffer.from("Fixture revision") });
@@ -136,7 +160,9 @@ test("reassessment submits revised files and saves returned text and history", a
   const record = await stored(page);
   expect(record.uploadedDocuments).toContain("revision.docx");
   expect(record.reviewHistory).toHaveLength(1);
-  expect(record.score).toBe(82);
+  expect(record.score).toBe(80);
+  expect(record.reviewVersions[0].score).toBe(82);
+  expect(record.reviewVersions[0].findings).toEqual(before.findings);
   expect(record.ratings).toEqual(review.ratings);
 });
 
@@ -164,3 +190,84 @@ test("storage quota failure leaves the review available for export", async ({ pa
   await page.getByRole("button", { name: /View full AI review/ }).click();
   await expect(page.locator("pre")).toContainText("Site-specific rescue plan missing.");
 });
+
+test("closed reassessment updates dashboard, saved state and PDF while preserving original history", async ({ page }) => {
+  await run(page);
+  await page.route("**/review/reassess-documents", async (route) => {
+    const body = route.request().postDataBuffer()?.toString() || "";
+    expect(body).toContain('name="original_findings"');
+    expect(body).toContain('"ref":"001"');
+    expect(body).toContain('name="risk_exposure"');
+    await route.fulfill({ json: closedReassessment });
+  });
+  await page.getByPlaceholder("Add close-out notes, evidence provided, contractor clarifications, closed items, remaining actions, or final reviewer position...").fill("Revision C closes the rescue finding");
+  await page.getByRole("button", { name: "Reassess Submission", exact: true }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("rams_ai_submissions") || "[]")[0]?.score === 96);
+  let record = await stored(page);
+  expect(record.decision).toBe("Ready for Approver Review");
+  expect(record.project).toBe("Fixture works");
+  expect(record.contractor).toBe("Fixture contractor");
+  expect(record.openFindings).toEqual([]);
+  expect(record.closedFindings).toHaveLength(1);
+  expect(record.residualRisk).toBe("LOW");
+  expect(record.riskExposure).toBe("HIGH");
+  expect(record.controlEffectiveness).toBe(96);
+  expect(record.ratings).toEqual(review.ratings);
+  expect(record.reviewVersions[0].reviewText).toBe(reviewText);
+  expect(record.reviewVersions[0].score).toBe(82);
+  expect(record.reviewVersions[0].findings[0].status).toBe("Open");
+  expect(record.reviewVersions[0].ratings).toEqual(review.ratings);
+  await expect(page.getByRole("heading", { name: "READY FOR APPROVER REVIEW", exact: true })).toBeVisible();
+  await expect(page.getByText("96%", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Show Closed Findings", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "Closed", exact: true })).toBeVisible();
+  await page.goto(`/review?submissionId=${encodeURIComponent(record.id)}`);
+  await expect(page.getByRole("button", { name: "Download Report" })).toBeVisible();
+  record = await stored(page);
+  expect(record.score).toBe(96);
+  expect(record.reviewVersions[0].score).toBe(82);
+  let pdf: Record<string, unknown> = {};
+  await page.route("**/review/dashboard-pdf", async (route) => {
+    pdf = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\nfixture" });
+  });
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Report" }).click();
+  await download;
+  expect(pdf.score).toBe(96);
+  expect(pdf.status).toBe("READY FOR APPROVER REVIEW");
+  expect(pdf.open_findings).toEqual([]);
+  expect(pdf.closed_findings).toEqual(closedReassessment.findings);
+  expect(pdf.control_effectiveness).toBe(96);
+  await expect(page.getByText("Review 1 — 82% — Further Amendments Required", { exact: true })).toBeVisible();
+
+  await page.route("**/review/reassess-documents", (route) => route.fulfill({ json: { ...openReassessment, score: 90, band: "Excellent", control_effectiveness: 90, findings: [{ ...review.findings[0], severity: "Major" }], review_text: "### **__Reassessed Executive Summary__**\n- Updated Score: 90%\n- Decision: Further Amendments Required" } }));
+  await page.getByRole("button", { name: "Reassess Submission", exact: true }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("rams_ai_submissions") || "[]")[0]?.score === 90);
+  record = await stored(page);
+  expect(record.reviewVersions.map((version: { score: number }) => version.score)).toEqual([82, 96]);
+  expect(record.openFindings[0].severity).toBe("Major");
+});
+
+for (const [label, invalid] of [
+  ["text-only", { review: "Legacy narrative claims 96%" }],
+  ["missing score", { ...closedReassessment, score: undefined }],
+  ["dropped finding", { ...closedReassessment, findings: [] }],
+  ["non-string decision", { ...closedReassessment, decision: ["Ready for Approver Review"] }],
+  ["invalid finding", { ...closedReassessment, findings: [{ ...review.findings[0], status: "Partially Closed" }] }],
+] as const) {
+  test(`${label} reassessment cannot overwrite the previous review`, async ({ page }) => {
+    await run(page);
+    const before = await stored(page);
+    await page.route("**/review/reassess-documents", (route) => route.fulfill({ json: invalid }));
+    await page.getByPlaceholder("Add close-out notes, evidence provided, contractor clarifications, closed items, remaining actions, or final reviewer position...").fill("Fixture evidence");
+    await page.getByRole("button", { name: "Reassess Submission", exact: true }).click();
+    await expect(page.locator("main").getByRole("alert")).toContainText("previous review has been preserved");
+    const record = await stored(page);
+    expect(record.score).toBe(82);
+    expect(record.findings).toEqual(before.findings);
+    expect(record.reviewText).toBe(reviewText);
+    expect(record.reviewVersions).toEqual([]);
+    expect(record.reviewHistory).toEqual([]);
+  });
+}
