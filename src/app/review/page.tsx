@@ -1,27 +1,11 @@
 "use client";
 
 import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
+import { parseReassessment, type ReassessmentFinding as Finding, type ReviewSnapshot, type Severity } from "@/lib/reassessment";
 
 type Section = {
   title: string;
   content: string[];
-};
-
-type Severity = "Critical" | "Major" | "Minor" | "Observation";
-
-type Finding = {
-  ref: string;
-  category: string;
-  finding: string;
-  severity: Severity;
-  status: "Open" | "Closed";
-  action: string;
-  dateRaised?: string;
-  dateClosed?: string;
-  createdReview?: string;
-  closedReview?: string;
-  evidenceUsed?: string;
-  aiReasoning?: string;
 };
 
 type StoredReview = {
@@ -64,6 +48,8 @@ type StoredReview = {
   findingsRegister?: Finding[];
   findings?: Finding[];
   reviewHistory?: string[];
+  reviewVersions?: ReviewSnapshot[];
+  scoringMethod?: string;
 };
 
 type ReviewFinding = Partial<Finding> & {
@@ -121,6 +107,8 @@ export default function Review() {
   const [showClosedFindings, setShowClosedFindings] = useState(false);
   const [findingRegister, setFindingRegister] = useState<Finding[]>([]);
   const [reviewHistory, setReviewHistory] = useState<string[]>([]);
+  const [reviewVersions, setReviewVersions] = useState<ReviewSnapshot[]>([]);
+  const [scoringMethod, setScoringMethod] = useState("initial-v1");
   const [showLanding, setShowLanding] = useState(true);
   const [uploadedDocumentNames, setUploadedDocumentNames] = useState<string[]>(
     [],
@@ -252,6 +240,8 @@ export default function Review() {
       setUploadedSupportingNames(saved.uploadedSupportingDocuments || []);
       setFindingRegister(saved.findingsRegister || saved.findings || []);
       setReviewHistory(saved.reviewHistory || []);
+      setReviewVersions(saved.reviewVersions || []);
+      setScoringMethod(saved.scoringMethod || "initial-v1");
       setStatusMessage("Stored submission loaded");
     } catch {
       localStorage.removeItem("rams_ai_active_review");
@@ -319,6 +309,9 @@ export default function Review() {
     try {
       setLoading(true);
       setReviewOutput("");
+      setReviewHistory([]);
+      setReviewVersions([]);
+      setScoringMethod("initial-v1");
       setStructuredScore(null);
       setStructuredBand("");
       setStructuredDecision("");
@@ -511,6 +504,9 @@ export default function Review() {
       formData.append("public_interface", publicInterface);
       formData.append("reviewer_notes", reviewerNotes);
 
+      formData.append("original_findings", JSON.stringify(registerFindings));
+      formData.append("risk_exposure", inherentRiskLevel);
+
       additionalReviewFiles.forEach((file) =>
         formData.append("review_files", file),
       );
@@ -532,20 +528,48 @@ export default function Review() {
         throw new Error(data.detail || "Submission reassessment failed");
       }
 
-      setUploadedDocumentNames((current) => [
-        ...current,
-        ...additionalReviewFiles.map((file) => file.name),
-      ]);
-      setUploadedSupportingNames((current) => [
-        ...current,
-        ...additionalSupportingFiles.map((file) => file.name),
-      ]);
-      const reassessmentText = data.review || data.updated_review || "No reassessment returned.";
+      const result = parseReassessment(data, registerFindings);
+      const snapshot: ReviewSnapshot = {
+        reviewNumber: reviewHistory.length + 1,
+        recordedAt: new Date().toISOString(),
+        projectName: reviewMeta.projectName,
+        contractorName: reviewMeta.contractor,
+        reviewText: reviewOutput,
+        score: calculatedScore,
+        band: scoreLabel,
+        decision: structuredDecision || dashboardStatus,
+        riskExposure: inherentRiskLevel,
+        residualRisk: residualRiskLevel,
+        controlEffectiveness,
+        ratings: structuredRatings,
+        findings: registerFindings,
+        uploadedDocuments: uploadedDocumentNames,
+        uploadedSupportingDocuments: uploadedSupportingNames,
+        reviewerComments: reviewerCloseoutComments,
+        scoringMethod,
+      };
+      setReviewVersions((current) => [...current, snapshot]);
+      setStructuredScore(result.score);
+      setStructuredBand(result.band);
+      setStructuredDecision(result.decision);
+      setStructuredRiskExposure(result.risk_exposure);
+      setStructuredResidualRisk(result.residual_risk);
+      setStructuredControlEffectiveness(result.control_effectiveness);
+      setFindingRegister(result.findings);
+      setScoringMethod(result.scoring_method);
+      setUploadedDocumentNames((current) => [...new Set([
+        ...current, ...additionalReviewFiles.map((file) => file.name),
+      ])]);
+      setUploadedSupportingNames((current) => [...new Set([
+        ...current, ...additionalSupportingFiles.map((file) => file.name),
+      ])]);
+      setAdditionalReviewFiles([]);
+      setAdditionalSupportingFiles([]);
       setReviewHistory((current) => [
         ...current,
         `Review ${current.length + 2} - ${new Date().toLocaleString("en-GB")} - reassessment completed`,
       ]);
-      setReviewOutput(reassessmentText);
+      setReviewOutput(result.review_text);
       setStatusMessage("Submission reassessed");
     } catch (error) {
       setStatusMessage("Reassessment failed");
@@ -714,7 +738,7 @@ export default function Review() {
         ?.split(":")
         .slice(1)
         .join(":")
-        .trim() || "Not clearly identified";
+        .trim() || reviewVersions[reviewVersions.length - 1]?.projectName || projectType || "Not clearly identified";
 
     const contractor =
       contextSection?.content
@@ -723,7 +747,7 @@ export default function Review() {
         ?.split(":")
         .slice(1)
         .join(":")
-        .trim() || "Not clearly identified";
+        .trim() || reviewVersions[reviewVersions.length - 1]?.contractorName || contractorName || "Not clearly identified";
 
     const updatedScore = parseUpdatedScore(reassessedContent);
 
@@ -801,6 +825,9 @@ export default function Review() {
     reviewFiles,
     supportingFiles,
     jurisdictionProfile,
+    reviewVersions,
+    projectType,
+    contractorName,
   ]);
 
   const observationItems = useMemo(() => {
@@ -1119,7 +1146,7 @@ export default function Review() {
     setFindingRegister((previous) => mergeFindingRegister(previous, findings));
   }, [reviewOutput, findings.length, reviewerCloseoutComments, structuredScore]);
 
-  const registerFindings = findingRegister.length ? findingRegister : findings;
+  const registerFindings = structuredScore !== null ? findingRegister : (findingRegister.length ? findingRegister : findings);
   const activeFindings = registerFindings.filter((f) => f.status !== "Closed");
   const closedFindings = registerFindings.filter((f) => f.status === "Closed");
   const displayedFindings = showClosedFindings ? registerFindings : activeFindings;
@@ -1373,6 +1400,8 @@ export default function Review() {
       openFindings: activeFindings,
       closeOutProgress,
       reviewHistory,
+      reviewVersions,
+      scoringMethod,
       riskExposure: inherentRiskLevel,
       residualRisk: residualRiskLevel,
       controlEffectiveness,
@@ -1421,8 +1450,17 @@ export default function Review() {
     reviewerCloseoutComments,
     uploadedDocumentNames,
     uploadedSupportingNames,
-    findingRegister.length,
+    findingRegister,
     closeOutProgress,
+    reviewVersions,
+    reviewHistory,
+    scoringMethod,
+    structuredRatings,
+    structuredBand,
+    structuredDecision,
+    structuredRiskExposure,
+    structuredResidualRisk,
+    structuredControlEffectiveness,
   ]);
 
   const severityBadge = (severity: Severity) => {
@@ -1691,8 +1729,9 @@ export default function Review() {
                         {dashboardStatus}
                       </h2>
                       <p className="mt-1 text-sm text-[#374151]">
-                        Further close-out is required before this submission can
-                        progress.
+                        {dashboardStatus === "READY FOR APPROVER REVIEW"
+                          ? "No material findings remain open. Competent approver review is still required."
+                          : "Further close-out is required before this submission can progress."}
                       </p>
                     </div>
                   </div>
@@ -2126,10 +2165,22 @@ export default function Review() {
                   <div className="space-y-4 text-sm">
                     <div>✅ Submission Received</div>
                     <div>✅ AI Analysis Completed</div>
-                    <div>✅ Review In Progress</div>
-                    <div className="font-black text-blue-600">
-                      ● Review Completed
-                    </div>
+                    {reviewHistory.map((entry) => <div key={entry}>{entry}</div>)}
+                    <div className="font-black text-blue-600">● Current review: {calculatedScore}% — {dashboardStatus}</div>
+                    {reviewVersions.map((version, index) => (
+                      <details key={`${version.recordedAt}-${index}`} className="rounded-xl border border-[#D6E2DA] p-3">
+                        <summary className="cursor-pointer font-semibold">
+                          Review {version.reviewNumber} — {version.score}% — {version.decision}
+                        </summary>
+                        <p className="mt-3">Project: {version.projectName} · Contractor: {version.contractorName}</p>
+                        <p className="mt-3">Evidence: {[...version.uploadedDocuments, ...version.uploadedSupportingDocuments].join(", ") || "No document names recorded"}</p>
+                        <p className="mt-2">Reviewer comments: {version.reviewerComments || "None recorded"}</p>
+                        <ul className="mt-2 space-y-1">
+                          {version.findings.map((finding) => <li key={finding.ref}>{finding.ref}: {finding.severity} / {finding.status} — {finding.finding}</li>)}
+                        </ul>
+                        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap font-sans">{formatReviewOutput(version.reviewText)}</pre>
+                      </details>
+                    ))}
                   </div>
                 </div>
               </section>
